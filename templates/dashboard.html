@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html>
+<body>
+
+<h1>Vault Dashboard</h1>
+
+<p>Welcome {{ session['username'] }}</p>
+
+<a href="/add-password">
+Add Password
+</a>
+
+<br><br>
+
+{% for item in passwords %}
+
+<div>
+
+    <strong>{{ item[1] }}</strong>
+
+    <br>
+
+    Username:
+    {{ item[2] }}
+
+</div>
+
+<hr>
+
+{% endfor %}
+
+<a href="/logout">
+Logout
+</a>
+
+</body>
+</html>

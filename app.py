@@ -180,32 +180,29 @@ def view_password(id):
     decrypted_password = decrypt_password(record[2])
 
     return render_template(
-        "view_password.html",
-        website=record[0],
-        username=record[1],
-        password=decrypted_password
-    )
+    "view_password.html",
+    website=record[0],
+    username=record[1],
+    password=decrypted_password
+)
 @app.route("/logout")
 def logout():
 
     session.clear()
 
     return redirect("/")
+
 @app.route("/generate-password")
 def generate_new_password():
 
     if "user_id" not in session:
         return redirect("/")
 
-    password = generate_password()
+    return render_template(
+        "generate_password.html"
+    )
 
-    return f"""
-    <h2>Generated Password</h2>
 
-    <p>{password}</p>
-
-    <a href='/dashboard'>Back</a>
-    """
 @app.route("/delete-password/<int:id>")
 def delete_password(id):
 

@@ -1,3 +1,4 @@
+from password_generator import generate_password
 from crypto_utils import encrypt_password
 from crypto_utils import decrypt_password
 from flask import (
@@ -165,6 +166,21 @@ def logout():
     session.clear()
 
     return redirect("/")
+@app.route("/generate-password")
+def generate_new_password():
+
+    if "user_id" not in session:
+        return redirect("/")
+
+    password = generate_password()
+
+    return f"""
+    <h2>Generated Password</h2>
+
+    <p>{password}</p>
+
+    <a href='/dashboard'>Back</a>
+    """
 @app.route("/add-password", methods=["GET", "POST"])
 def add_password():
 

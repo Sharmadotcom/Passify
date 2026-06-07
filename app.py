@@ -17,6 +17,12 @@ from werkzeug.security import (
     generate_password_hash,
     check_password_hash
 )
+import pyotp
+import qrcode
+import qrcode.image.svg
+import io
+import base64
+
 from database import init_db
 from hibp import check_pwned
 
@@ -265,7 +271,7 @@ def login():
         cursor = conn.cursor()
 
         cursor.execute(
-            "SELECT * FROM users WHERE username = ?",
+            "SELECT id, username, password_hash, two_factor_enabled FROM users WHERE username = ?",
             (username,)
         )
 
@@ -273,15 +279,51 @@ def login():
         conn.close()
 
         if user and check_password_hash(user[2], password):
-            session["user_id"] = user[0]
-            session["username"] = user[1]
-            return redirect("/dashboard")
+            if user[3] == 1:
+                session["pre_2fa_user_id"] = user[0]
+                session["pre_2fa_username"] = user[1]
+                return redirect("/login-2fa")
+            else:
+                session["user_id"] = user[0]
+                session["username"] = user[1]
+                return redirect("/dashboard")
 
         flash("❌ Invalid username or password.", "error")
         return redirect("/")
 
     # GET request
     return render_template("login.html")
+
+
+@app.route("/login-2fa", methods=["GET", "POST"])
+def login_2fa():
+    if "pre_2fa_user_id" not in session:
+        return redirect("/")
+
+    if request.method == "POST":
+        token = request.form.get("token", "").strip().replace(" ", "")
+        conn = sqlite3.connect("database.db")
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT two_factor_secret FROM users WHERE id = ?",
+            (session["pre_2fa_user_id"],)
+        )
+        row = cursor.fetchone()
+        conn.close()
+
+        if row and row[0]:
+            totp = pyotp.TOTP(row[0])
+            if totp.verify(token, valid_window=1):
+                session["user_id"] = session["pre_2fa_user_id"]
+                session["username"] = session["pre_2fa_username"]
+                session.pop("pre_2fa_user_id", None)
+                session.pop("pre_2fa_username", None)
+                return redirect("/dashboard")
+
+        flash("❌ Invalid 2FA code.", "error")
+        return redirect("/login-2fa")
+
+    return render_template("login_2fa.html")
 @app.route("/register", methods=["GET", "POST"])
 def register():
 
@@ -383,19 +425,28 @@ def view_password(id):
         (id, session["user_id"])
     )
     record = cursor.fetchone()
+    cursor.execute("SELECT strict_mode FROM users WHERE id = ?", (session["user_id"],))
+    user_row = cursor.fetchone()
+    strict_mode = bool(user_row[0]) if user_row else False
+    
     conn.close()
 
     if not record:
         return "Password not found"
 
-    decrypted_password = decrypt_password(record[2])
+    if strict_mode:
+        decrypted_password = "***HIDDEN***"
+    else:
+        decrypted_password = decrypt_password(record[2])
 
     return render_template(
-    "view_password.html",
-    website=record[0],
-    username=record[1],
-    password=decrypted_password
-)
+        "view_password.html",
+        website=record[0],
+        username=record[1],
+        password=decrypted_password,
+        strict_mode=strict_mode,
+        vault_id=id
+    )
 
 
 @app.route("/logout")
@@ -622,7 +673,131 @@ def account_settings():
 def security_settings():
     if "user_id" not in session:
         return redirect("/")
-    return render_template("security_settings.html")
+    
+    conn = sqlite3.connect("database.db")
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT two_factor_enabled, strict_mode, login_alerts FROM users WHERE id = ?",
+        (session["user_id"],)
+    )
+    row = cursor.fetchone()
+    conn.close()
+
+    two_factor_enabled = bool(row[0]) if row else False
+    strict_mode = bool(row[1]) if row else False
+    login_alerts = bool(row[2]) if row else False
+
+    return render_template(
+        "security_settings.html",
+        two_factor_enabled=two_factor_enabled,
+        strict_mode=strict_mode,
+        login_alerts=login_alerts
+    )
+
+
+@app.route("/update-security-settings", methods=["POST"])
+def update_security_settings():
+    if "user_id" not in session:
+        return redirect("/")
+    
+    setting = request.form.get("setting")
+    value = request.form.get("value")
+    
+    conn = sqlite3.connect("database.db")
+    cursor = conn.cursor()
+    
+    if setting == "strict_mode":
+        cursor.execute("UPDATE users SET strict_mode = ? WHERE id = ?", (1 if value == "true" else 0, session["user_id"]))
+    elif setting == "login_alerts":
+        cursor.execute("UPDATE users SET login_alerts = ? WHERE id = ?", (1 if value == "true" else 0, session["user_id"]))
+    elif setting == "disable_2fa":
+        cursor.execute("UPDATE users SET two_factor_enabled = 0, two_factor_secret = '' WHERE id = ?", (session["user_id"],))
+        flash("✅ Two-Factor Authentication disabled.", "success")
+        
+    conn.commit()
+    conn.close()
+    
+    return "OK", 200
+
+
+@app.route("/setup-2fa", methods=["GET", "POST"])
+def setup_2fa():
+    if "user_id" not in session:
+        return redirect("/")
+    
+    conn = sqlite3.connect("database.db")
+    cursor = conn.cursor()
+    cursor.execute("SELECT email, two_factor_enabled FROM users WHERE id = ?", (session["user_id"],))
+    user_row = cursor.fetchone()
+    email = user_row[0] if user_row else "user@passify.local"
+    if user_row and user_row[1] == 1:
+        conn.close()
+        flash("⚠️ 2FA is already enabled.", "warning")
+        return redirect("/security-settings")
+    
+    if request.method == "POST":
+        token = request.form.get("token", "").strip().replace(" ", "")
+        secret = session.get("temp_2fa_secret")
+        
+        if not secret:
+            conn.close()
+            return redirect("/setup-2fa")
+            
+        totp = pyotp.TOTP(secret)
+        if totp.verify(token, valid_window=1):
+            cursor.execute("UPDATE users SET two_factor_enabled = 1, two_factor_secret = ? WHERE id = ?", (secret, session["user_id"]))
+            conn.commit()
+            conn.close()
+            session.pop("temp_2fa_secret", None)
+            flash("✅ Two-Factor Authentication successfully enabled!", "success")
+            return redirect("/security-settings")
+        else:
+            conn.close()
+            flash("❌ Invalid code. Try again.", "error")
+            return redirect("/setup-2fa")
+            
+    # GET: Generate new secret and QR code if not exists
+    secret = session.get("temp_2fa_secret")
+    if not secret:
+        secret = pyotp.random_base32()
+        session["temp_2fa_secret"] = secret
+    
+    totp_uri = pyotp.totp.TOTP(secret).provisioning_uri(name=email, issuer_name="Passify")
+    
+    img = qrcode.make(totp_uri)
+    stream = io.BytesIO()
+    img.save(stream, format="PNG")
+    qr_b64 = "data:image/png;base64," + base64.b64encode(stream.getvalue()).decode('utf-8')
+    conn.close()
+    
+    return render_template("setup_2fa.html", qr_b64=qr_b64, secret=secret)
+
+
+@app.route("/api/unlock-password/<int:vault_id>", methods=["POST"])
+def unlock_password(vault_id):
+    if "user_id" not in session:
+        return "Unauthorized", 401
+        
+    master_password = request.form.get("master_password", "")
+    
+    conn = sqlite3.connect("database.db")
+    cursor = conn.cursor()
+    
+    cursor.execute("SELECT password_hash FROM users WHERE id = ?", (session["user_id"],))
+    user_row = cursor.fetchone()
+    if not user_row or not check_password_hash(user_row[0], master_password):
+        conn.close()
+        return "Incorrect Master Password", 403
+        
+    cursor.execute("SELECT site_password FROM vault WHERE id = ? AND user_id = ?", (vault_id, session["user_id"]))
+    vault_row = cursor.fetchone()
+    conn.close()
+    
+    if not vault_row:
+        return "Not found", 404
+        
+    decrypted = decrypt_password(vault_row[0])
+    return decrypted, 200
 
 
 @app.route("/change-password", methods=["POST"])

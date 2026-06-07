@@ -1,0 +1,87 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Setup 2FA | Passify</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <style>
+        .modal-container { display: block;
+            max-width: 480px;
+            width: 100%;
+            margin: 60px auto;
+            padding: 40px;
+            background: rgba(255,255,255,.03);
+            border: 1px solid rgba(255,255,255,.08);
+            border-radius: 24px;
+            text-align: center;
+        }
+        .qr-code {
+            background: white;
+            padding: 16px;
+            border-radius: 12px;
+            margin: 24px auto;
+            width: 200px;
+            height: 200px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .qr-code svg {
+            width: 100%;
+            height: 100%;
+        }
+        .secret-key {
+            background: rgba(0,0,0,.3);
+            padding: 10px;
+            border-radius: 8px;
+            font-family: monospace;
+            letter-spacing: 2px;
+            color: #a78bfa;
+            margin-bottom: 24px;
+            user-select: all;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="modal-container">
+        <h1 style="margin-top:0;">Setup 2FA</h1>
+        <p style="color:#9ca3af; margin-bottom:24px;">Scan the QR code below with your authenticator app (like Google Authenticator or Authy).</p>
+        
+        <div class="qr-code">
+            <img src="{{ qr_b64 }}" alt="QR Code" style="width: 100%; height: 100%; border-radius: 8px;">
+        </div>
+        
+        <p style="color:#9ca3af; font-size:0.875rem;">Or enter this code manually:</p>
+        <div class="secret-key">{{ secret }}</div>
+        
+        <form method="POST" action="/setup-2fa">
+            <div class="form-group" style="text-align: left;">
+                <label>Enter 6-digit code</label>
+                <input type="text" name="token" placeholder="000000" maxlength="6" autocomplete="off" required style="text-align: center; letter-spacing: 12px; font-size: 1.5rem; font-weight: bold;">
+            </div>
+            
+            <button type="submit" class="auth-btn" style="width: 100%; margin-top: 12px;">Verify & Enable 2FA</button>
+            <a href="/security-settings" style="display:block; margin-top:16px; color:#9ca3af; text-decoration:none;">Cancel</a>
+        </form>
+    </div>
+
+    <!-- Flash messages -->
+    {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+    <div class="flash-container">
+        {% for category, message in messages %}
+        <div class="flash {{ category }}" role="alert">
+            {{ message }}
+            <button class="flash-dismiss" onclick="this.parentElement.style.animation='flashOut .3s forwards';setTimeout(()=>this.parentElement.remove(),300);">&times;</button>
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+    {% endwith %}
+
+</body>
+</html>
+
+

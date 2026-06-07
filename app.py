@@ -117,6 +117,142 @@ def calculate_security_score(user_id):
     return security_score, total, weak, medium, strong, reused_passwords
 
 
+def get_recommendations(user_id: int) -> list:
+    """
+    Analyse every vault password for the given user and return a list of
+    specific, prioritised, actionable security recommendation dicts.
+
+    Each dict has:
+        priority  — 'high' | 'medium' | 'low'
+        icon      — emoji
+        title     — short headline
+        detail    — explanation (may include a count)
+    """
+    conn = sqlite3.connect("database.db")
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT site_password, created_at FROM vault WHERE user_id = ?",
+        (user_id,)
+    )
+    rows = cursor.fetchall()
+    conn.close()
+
+    # ── Counters ─────────────────────────────────────────────
+    too_short   = 0   # < 12 characters
+    no_upper    = 0   # no uppercase letter
+    no_special  = 0   # no special character
+    no_digit    = 0   # no number
+    seen        = {}  # password → count (for reuse detection)
+    stale_count = 0   # 90–179 days old
+    overdue_count = 0 # 180+ days old
+
+    for enc_pw, created_at in rows:
+        pw = decrypt_password(enc_pw)
+        if not pw:
+            continue
+
+        seen[pw] = seen.get(pw, 0) + 1
+
+        if len(pw) < 12:
+            too_short += 1
+        if not any(c.isupper() for c in pw):
+            no_upper += 1
+        if not any(not c.isalnum() for c in pw):
+            no_special += 1
+        if not any(c.isdigit() for c in pw):
+            no_digit += 1
+
+        age = get_age_status(created_at)
+        if age["status"] == "critical":
+            overdue_count += 1
+        elif age["status"] == "warn":
+            stale_count += 1
+
+    reused = sum(1 for c in seen.values() if c > 1)
+    total  = len(rows)
+
+    recs = []
+
+    # ── High priority ─────────────────────────────────────────
+    if too_short:
+        recs.append({
+            "priority": "high",
+            "icon": "📏",
+            "title": "Use at least 12 characters",
+            "detail": f"{too_short} of your password(s) are shorter than 12 characters. "
+                      "Longer passwords are exponentially harder to crack.",
+        })
+    if no_special:
+        recs.append({
+            "priority": "high",
+            "icon": "✱️",
+            "title": "Add special characters (!, @, #, $…)",
+            "detail": f"{no_special} password(s) contain no special characters. "
+                      "Symbols dramatically increase entropy.",
+        })
+    if reused:
+        recs.append({
+            "priority": "high",
+            "icon": "🔄",
+            "title": "Use a unique password for every account",
+            "detail": f"{reused} password(s) are reused across multiple sites. "
+                      "A single breach exposes all of them.",
+        })
+    if overdue_count:
+        recs.append({
+            "priority": "high",
+            "icon": "🔴",
+            "title": "Update overdue passwords immediately",
+            "detail": f"{overdue_count} password(s) are over 180 days old. "
+                      "Rotating credentials limits exposure from undetected breaches.",
+        })
+
+    # ── Medium priority ─────────────────────────────────────
+    if no_upper:
+        recs.append({
+            "priority": "medium",
+            "icon": "🔠",
+            "title": "Mix uppercase and lowercase letters",
+            "detail": f"{no_upper} password(s) use no uppercase letters. "
+                      "Case variation increases the keyspace significantly.",
+        })
+    if no_digit:
+        recs.append({
+            "priority": "medium",
+            "icon": "🔢",
+            "title": "Include numbers in your passwords",
+            "detail": f"{no_digit} password(s) contain no digits. "
+                      "Adding numbers makes dictionary attacks less effective.",
+        })
+    if stale_count:
+        recs.append({
+            "priority": "medium",
+            "icon": "⏳",
+            "title": "Rotate passwords older than 90 days",
+            "detail": f"{stale_count} password(s) are between 90 and 179 days old. "
+                      "Regular rotation reduces long-term exposure risk.",
+        })
+
+    # ── Low priority (always shown) ──────────────────────────
+    recs.append({
+        "priority": "low",
+        "icon": "🔐",
+        "title": "Enable MFA on every important account",
+        "detail": "Two-factor authentication stops 99.9% of automated attacks "
+                  "even if your password is compromised.",
+    })
+    if total > 0:
+        recs.append({
+            "priority": "low",
+            "icon": "⭐",
+            "title": "Use the built-in password generator",
+            "detail": "The generator creates cryptographically random 16-character "
+                      "passwords that are near-impossible to brute-force.",
+        })
+
+    return recs
+
+
 @app.route("/", methods=["GET", "POST"])
 def login():
 
@@ -297,6 +433,8 @@ def security_center():
     stale    = sum(1 for r in age_rows if get_age_status(r[0])["status"] == "warn")
     overdue  = sum(1 for r in age_rows if get_age_status(r[0])["status"] == "critical")
 
+    recommendations = get_recommendations(session["user_id"])
+
     return render_template(
         "security_center.html",
         total=total,
@@ -307,6 +445,7 @@ def security_center():
         security_score=security_score,
         stale=stale,
         overdue=overdue,
+        recommendations=recommendations,
     )
 
 
@@ -406,5 +545,160 @@ def add_password():
     return render_template("add_password.html")
 
 
+@app.route("/profile", methods=["GET"])
+def profile():
+    if "user_id" not in session:
+        return redirect("/")
+
+    conn = sqlite3.connect("database.db")
+    cursor = conn.cursor()
+
+    # GET — fetch user info and stats
+    cursor.execute(
+        "SELECT username, email, created_at FROM users WHERE id = ?",
+        (session["user_id"],)
+    )
+    user = cursor.fetchone()
+    conn.close()
+
+    password_count, _, _, _, _, _ = calculate_security_score(session["user_id"])
+    security_score = password_count  # reuse for count; recalculate score below
+    security_score, total, _, _, _, _ = calculate_security_score(session["user_id"])
+
+    # Format joined date
+    joined_label = "Unknown"
+    if user[2]:
+        try:
+            from datetime import datetime
+            joined = datetime.fromisoformat(user[2])
+            joined_label = joined.strftime("%B %Y")
+        except ValueError:
+            pass
+
+    return render_template(
+        "profile.html",
+        username=user[0],
+        email=user[1] or "",
+        joined=joined_label,
+        password_count=total,
+        security_score=security_score,
+    )
+
+
+@app.route("/account-settings", methods=["GET", "POST"])
+def account_settings():
+    if "user_id" not in session:
+        return redirect("/")
+
+    conn = sqlite3.connect("database.db")
+    cursor = conn.cursor()
+
+    if request.method == "POST":
+        email = request.form.get("email", "").strip()
+        cursor.execute(
+            "UPDATE users SET email = ? WHERE id = ?",
+            (email, session["user_id"])
+        )
+        conn.commit()
+        conn.close()
+        flash("✅ Email updated successfully!", "success")
+        return redirect("/account-settings")
+
+    cursor.execute(
+        "SELECT email FROM users WHERE id = ?",
+        (session["user_id"],)
+    )
+    row = cursor.fetchone()
+    email = row[0] if row and row[0] else ""
+    
+    # We still need the password count for the Danger Zone message
+    _, total, _, _, _, _ = calculate_security_score(session["user_id"])
+    conn.close()
+
+    return render_template("account_settings.html", email=email, password_count=total)
+
+
+@app.route("/security-settings", methods=["GET"])
+def security_settings():
+    if "user_id" not in session:
+        return redirect("/")
+    return render_template("security_settings.html")
+
+
+@app.route("/change-password", methods=["POST"])
+def change_password():
+    if "user_id" not in session:
+        return redirect("/")
+
+    current = request.form.get("current_password", "")
+    new_pw  = request.form.get("new_password", "")
+    confirm = request.form.get("confirm_password", "")
+
+    # Fetch current hash
+    conn = sqlite3.connect("database.db")
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT password_hash FROM users WHERE id = ?",
+        (session["user_id"],)
+    )
+    row = cursor.fetchone()
+
+    if not row or not check_password_hash(row[0], current):
+        conn.close()
+        flash("❌ Current password is incorrect.", "error")
+        return redirect("/account-settings")
+
+    if new_pw != confirm:
+        conn.close()
+        flash("❌ New passwords do not match.", "error")
+        return redirect("/account-settings")
+
+    if len(new_pw) < 8:
+        conn.close()
+        flash("❌ New password must be at least 8 characters.", "error")
+        return redirect("/account-settings")
+
+    if check_password_hash(row[0], new_pw):
+        conn.close()
+        flash("❌ New password must differ from your current password.", "error")
+        return redirect("/account-settings")
+
+    new_hash = generate_password_hash(new_pw)
+    cursor.execute(
+        "UPDATE users SET password_hash = ? WHERE id = ?",
+        (new_hash, session["user_id"])
+    )
+    conn.commit()
+    conn.close()
+
+    flash("✅ Password changed successfully!", "success")
+    return redirect("/account-settings")
+
+
+@app.route("/delete-account", methods=["POST"])
+def delete_account():
+    if "user_id" not in session:
+        return redirect("/")
+
+    confirm_text = request.form.get("confirm_text", "").strip()
+
+    if confirm_text != "DELETE":
+        flash("❌ You must type DELETE exactly to confirm account deletion.", "error")
+        return redirect("/account-settings")
+
+    user_id = session["user_id"]
+
+    conn = sqlite3.connect("database.db")
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM vault WHERE user_id = ?", (user_id,))
+    cursor.execute("DELETE FROM users WHERE id = ?", (user_id,))
+    conn.commit()
+    conn.close()
+
+    session.clear()
+    flash("Your account has been permanently deleted.", "success")
+    return redirect("/")
+
+
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run(debug=True)

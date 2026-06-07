@@ -9,7 +9,9 @@ def init_db():
     CREATE TABLE IF NOT EXISTS users(
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         username TEXT UNIQUE NOT NULL,
-        password_hash TEXT NOT NULL
+        password_hash TEXT NOT NULL,
+        email TEXT DEFAULT '',
+        created_at TEXT DEFAULT (datetime('now'))
     )
     """)
 
@@ -24,17 +26,22 @@ def init_db():
     )
     """)
 
-    # ── Migration: add created_at to existing databases that pre-date this column
-    existing_columns = [
-        row[1]
-        for row in cursor.execute("PRAGMA table_info(vault)")
-    ]
-    if "created_at" not in existing_columns:
-        # SQLite ALTER TABLE does not allow function-based DEFAULT expressions,
-        # so we add the column without a default and back-fill manually.
+    # ── Migrations for databases created before these columns existed ──
+    user_cols = [row[1] for row in cursor.execute("PRAGMA table_info(users)")]
+
+    if "email" not in user_cols:
+        cursor.execute("ALTER TABLE users ADD COLUMN email TEXT DEFAULT ''")
+
+    if "created_at" not in user_cols:
+        cursor.execute("ALTER TABLE users ADD COLUMN created_at TEXT")
         cursor.execute(
-            "ALTER TABLE vault ADD COLUMN created_at TEXT"
+            "UPDATE users SET created_at = datetime('now') WHERE created_at IS NULL"
         )
+
+    vault_cols = [row[1] for row in cursor.execute("PRAGMA table_info(vault)")]
+
+    if "created_at" not in vault_cols:
+        cursor.execute("ALTER TABLE vault ADD COLUMN created_at TEXT")
         cursor.execute(
             "UPDATE vault SET created_at = datetime('now') WHERE created_at IS NULL"
         )

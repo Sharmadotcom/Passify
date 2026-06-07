@@ -13,6 +13,107 @@
     <link rel="stylesheet"
           href="{{ url_for('static', filename='style.css') }}">
 
+    <style>
+
+        /* ── Recommendations list ─────────────────────────── */
+        .rec-list {
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+            margin-top: 28px;
+        }
+
+        .rec-card {
+            display: flex;
+            align-items: flex-start;
+            gap: 16px;
+            padding: 18px 20px;
+            border-radius: 14px;
+            background: rgba(255,255,255,.04);
+            border-left: 4px solid transparent;
+            transition: background .2s;
+        }
+
+        .rec-card:hover {
+            background: rgba(255,255,255,.07);
+        }
+
+        .rec-card.high {
+            border-color: #ef4444;
+        }
+
+        .rec-card.medium {
+            border-color: #f59e0b;
+        }
+
+        .rec-card.low {
+            border-color: #6366f1;
+        }
+
+        .rec-icon {
+            font-size: 1.5rem;
+            flex-shrink: 0;
+            line-height: 1;
+            margin-top: 2px;
+        }
+
+        .rec-body {
+            flex: 1;
+        }
+
+        .rec-title {
+            font-size: 1rem;
+            font-weight: 600;
+            color: #f9fafb;
+            margin: 0 0 4px;
+        }
+
+        .rec-detail {
+            font-size: .875rem;
+            color: #9ca3af;
+            margin: 0;
+            line-height: 1.5;
+        }
+
+        .rec-badge {
+            align-self: center;
+            flex-shrink: 0;
+            font-size: .72rem;
+            font-weight: 700;
+            letter-spacing: .06em;
+            padding: 3px 10px;
+            border-radius: 999px;
+        }
+
+        .rec-badge.high {
+            background: rgba(239,68,68,.15);
+            color: #fca5a5;
+            border: 1px solid rgba(239,68,68,.3);
+        }
+
+        .rec-badge.medium {
+            background: rgba(245,158,11,.15);
+            color: #fde68a;
+            border: 1px solid rgba(245,158,11,.3);
+        }
+
+        .rec-badge.low {
+            background: rgba(99,102,241,.15);
+            color: #a5b4fc;
+            border: 1px solid rgba(99,102,241,.3);
+        }
+
+        .rec-section-title {
+            font-size: .8rem;
+            font-weight: 700;
+            letter-spacing: .1em;
+            text-transform: uppercase;
+            color: #6b7280;
+            margin: 28px 0 10px;
+        }
+
+    </style>
+
 </head>
 
 <body>
@@ -24,7 +125,7 @@
         <div class="logo">
 
             <div class="logo-icon">
-                🔒
+                🔐
             </div>
 
             <span>
@@ -52,13 +153,7 @@
                 Generator
             </a>
 
-            <a href="#">
-                Settings
-            </a>
-
-            <a href="/logout">
-                Logout
-            </a>
+        </nav>
 
         </nav>
 
@@ -84,6 +179,7 @@
 
         </section>
 
+        <!-- Score banner -->
         <section class="security-banner">
 
             <div>
@@ -104,124 +200,219 @@
 
         </section>
 
+        <!-- Stats -->
         <section class="stats">
 
             <div class="glass-card">
-
-                <h2>
-                    {{ total }}
-                </h2>
-
-                <span>
-                    Total Passwords
-                </span>
-
+                <h2>{{ total }}</h2>
+                <span>Total Passwords</span>
             </div>
 
             <div class="glass-card">
-
-                <h2>
-                    {{ strong }}
-                </h2>
-
-                <span>
-                    Strong Passwords
-                </span>
-
+                <h2>{{ strong }}</h2>
+                <span>Strong Passwords</span>
             </div>
 
             <div class="glass-card">
-
-                <h2>
-                    {{ medium }}
-                </h2>
-
-                <span>
-                    Medium Passwords
-                </span>
-
+                <h2>{{ medium }}</h2>
+                <span>Medium Passwords</span>
             </div>
 
             <div class="glass-card">
-
-                <h2>
-                    {{ weak }}
-                </h2>
-
-                <span>
-                    Weak Passwords
-                </span>
-
+                <h2>{{ weak }}</h2>
+                <span>Weak Passwords</span>
             </div>
 
             <div class="glass-card">
+                <h2>{{ reused_passwords }}</h2>
+                <span>Reused Passwords</span>
+            </div>
 
-                <h2>
-                    {{ reused_passwords }}
-                </h2>
+            <div class="glass-card age-warn-card">
+                <h2>{{ stale }}</h2>
+                <span>Stale (90d+)</span>
+            </div>
 
-                <span>
-                    Reused Passwords
-                </span>
-
+            <div class="glass-card age-critical-card">
+                <h2>{{ overdue }}</h2>
+                <span>Overdue (180d+)</span>
             </div>
 
         </section>
 
-        {% if weak > 0 or reused_passwords > 0 %}
+        <!-- ── Security Recommendations ───────────────────── -->
+        <section>
 
-        <div class="security-banner">
+            <h2 style="margin-top:36px; margin-bottom:4px;">
+                🛡️ Security Recommendations
+            </h2>
+
+            <p style="color:#9ca3af; font-size:.9rem; margin-bottom:0;">
+                Specific actions to improve your vault security — sorted by priority.
+            </p>
+
+            {% set high_recs   = recommendations | selectattr("priority","eq","high")   | list %}
+            {% set medium_recs = recommendations | selectattr("priority","eq","medium") | list %}
+            {% set low_recs    = recommendations | selectattr("priority","eq","low")    | list %}
+
+            {% if high_recs %}
+            <p class="rec-section-title">🔴 High Priority</p>
+            <div class="rec-list">
+                {% for rec in high_recs %}
+                <div class="rec-card high">
+                    <div class="rec-icon">{{ rec.icon }}</div>
+                    <div class="rec-body">
+                        <p class="rec-title">{{ rec.title }}</p>
+                        <p class="rec-detail">{{ rec.detail }}</p>
+                    </div>
+                    <span class="rec-badge high">HIGH</span>
+                </div>
+                {% endfor %}
+            </div>
+            {% endif %}
+
+            {% if medium_recs %}
+            <p class="rec-section-title">🟡 Medium Priority</p>
+            <div class="rec-list">
+                {% for rec in medium_recs %}
+                <div class="rec-card medium">
+                    <div class="rec-icon">{{ rec.icon }}</div>
+                    <div class="rec-body">
+                        <p class="rec-title">{{ rec.title }}</p>
+                        <p class="rec-detail">{{ rec.detail }}</p>
+                    </div>
+                    <span class="rec-badge medium">MEDIUM</span>
+                </div>
+                {% endfor %}
+            </div>
+            {% endif %}
+
+            {% if low_recs %}
+            <p class="rec-section-title">🔵 Best Practices</p>
+            <div class="rec-list">
+                {% for rec in low_recs %}
+                <div class="rec-card low">
+                    <div class="rec-icon">{{ rec.icon }}</div>
+                    <div class="rec-body">
+                        <p class="rec-title">{{ rec.title }}</p>
+                        <p class="rec-detail">{{ rec.detail }}</p>
+                    </div>
+                    <span class="rec-badge low">TIP</span>
+                </div>
+                {% endfor %}
+            </div>
+            {% endif %}
+
+        </section>
+
+        {% if stale > 0 or overdue > 0 %}
+        <div class="security-banner" style="margin-top:28px;">
 
             <div>
 
                 <h2>
-                    ⚠ Security Findings
+                    🕐 Password Expiry Findings
                 </h2>
 
                 <p>
 
-                    {% if weak > 0 %}
-                    • {{ weak }} weak password(s) detected.<br>
+                    {% if overdue > 0 %}
+                    • {{ overdue }} password(s) are <strong>180+ days old</strong> — update immediately.<br>
                     {% endif %}
 
-                    {% if reused_passwords > 0 %}
-                    • {{ reused_passwords }} reused password(s) detected.<br>
+                    {% if stale > 0 %}
+                    • {{ stale }} password(s) are <strong>90–179 days old</strong> — consider updating soon.<br>
                     {% endif %}
 
-                    Review and update these credentials to improve security.
+                    Go to the Dashboard to identify and update stale entries.
 
                 </p>
 
             </div>
 
         </div>
-
         {% endif %}
 
-        <div class="security-banner">
-
-            <div>
-
-                <h2>
-                    💡 Security Tips
-                </h2>
-
-                <p>
-                    • Use unique passwords for every account<br>
-                    • Enable Two-Factor Authentication (2FA)<br>
-                    • Avoid reusing passwords across websites<br>
-                    • Use the built-in password generator<br>
-                    • Update weak passwords regularly
-                </p>
-
-            </div>
-
-        </div>
+        
 
     </main>
 
 </div>
 
+    <!-- ── Fixed profile menu (top-right) ───────────── -->
+    <div class="topbar-profile" id="profileMenu">
+
+        <button class="profile-trigger" onclick="toggleProfile(event)">
+
+            <div class="profile-avatar">
+                {{ session.username[0]|upper if session.username else "?" }}
+            </div>
+
+            <span class="profile-name-label">{{ session.username }}</span>
+
+            <span class="profile-chevron" id="profileChevron">▾</span>
+
+        </button>
+
+        <div class="profile-dropdown" id="profileDropdown">
+
+            <div class="dropdown-user-header">
+                <div class="profile-avatar large">
+                    {{ session.username[0]|upper if session.username else "?" }}
+                </div>
+                <div>
+                    <strong>{{ session.username }}</strong>
+                    <span>Vault Member</span>
+                </div>
+            </div>
+
+            <div class="dropdown-divider"></div>
+
+            <a href="/profile">
+                👤 &nbsp;Profile
+            </a>
+
+            <a href="/security-settings">
+                🛡️ &nbsp;Security Settings
+            </a>
+
+            <a href="/account-settings">
+                ⚙️ &nbsp;Account Settings
+            </a>
+
+            <div class="dropdown-divider"></div>
+
+            <a href="/logout" class="logout-btn">
+                🚪 &nbsp;Logout
+            </a>
+
+        </div>
+
+    </div>
+
+    <script>
+    function toggleProfile(e) {
+        e.stopPropagation();
+        const menu = document.getElementById("profileMenu");
+        const open = menu.classList.toggle("open");
+        document.getElementById("profileChevron").textContent = open ? "▴" : "▾";
+    }
+    document.addEventListener("click", function() {
+        const menu = document.getElementById("profileMenu");
+        if (menu && menu.classList.contains("open")) {
+            menu.classList.remove("open");
+            document.getElementById("profileChevron").textContent = "▾";
+        }
+    });
+    </script>
+
 </body>
 
 </html>
+
+
+
+
+
+
+

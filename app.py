@@ -1,4 +1,5 @@
 import os
+from datetime import datetime, timezone
 from password_generator import generate_password
 from crypto_utils import encrypt_password
 from crypto_utils import decrypt_password
@@ -8,7 +9,8 @@ from flask import (
     request,
     redirect,
     session,
-    url_for
+    url_for,
+    flash
 )
 import sqlite3
 from werkzeug.security import (
@@ -16,10 +18,46 @@ from werkzeug.security import (
     check_password_hash
 )
 from database import init_db
+from hibp import check_pwned
 
 init_db()
 app = Flask(__name__)
 app.secret_key = "super-secret-key"
+
+
+def get_age_status(created_at_str: str) -> dict:
+    """
+    Given an ISO datetime string from SQLite, return a dict with:
+        days        — int, days since the password was added
+        status      — 'fresh' | 'warn' | 'critical'
+        label       — human-readable age string
+    """
+    try:
+        created = datetime.fromisoformat(created_at_str)
+    except (TypeError, ValueError):
+        return {"days": 0, "status": "fresh", "label": "Unknown"}
+
+    days = (datetime.now() - created).days
+
+    if days >= 180:
+        status = "critical"
+    elif days >= 90:
+        status = "warn"
+    else:
+        status = "fresh"
+
+    if days == 0:
+        label = "Added today"
+    elif days == 1:
+        label = "Added yesterday"
+    elif days < 30:
+        label = f"Added {days}d ago"
+    elif days < 365:
+        label = f"Added {days // 30}mo ago"
+    else:
+        label = f"Added {days // 365}yr ago"
+
+    return {"days": days, "status": status, "label": label}
 
 
 def get_password_score(password):
@@ -103,7 +141,8 @@ def login():
             session["username"] = user[1]
             return redirect("/dashboard")
 
-        return "Invalid Username or Password"
+        flash("❌ Invalid username or password.", "error")
+        return redirect("/")
 
     # GET request
     return render_template("login.html")
@@ -139,7 +178,8 @@ def register():
         except sqlite3.IntegrityError:
 
             conn.close()
-            return "User Already Exists"
+            flash("❌ That username is already taken. Please choose another.", "error")
+            return redirect("/register")
 
     return render_template("register.html")
 @app.route("/dashboard")
@@ -154,7 +194,7 @@ def dashboard():
     if search:
         cursor.execute(
             """
-            SELECT id, website, site_username
+            SELECT id, website, site_username, created_at
             FROM vault
             WHERE user_id = ? AND website LIKE ?
             """,
@@ -163,23 +203,33 @@ def dashboard():
     else:
         cursor.execute(
             """
-            SELECT id, website, site_username
+            SELECT id, website, site_username, created_at
             FROM vault
             WHERE user_id = ?
             """,
             (session["user_id"],)
         )
 
-        passwords = cursor.fetchall()
-        conn.close()
+    rows = cursor.fetchall()
+    conn.close()
 
-        security_score, _, _, _, _, _ = calculate_security_score(session["user_id"])
+    passwords = [
+        {
+            "id":         row[0],
+            "website":    row[1],
+            "username":   row[2],
+            "age":        get_age_status(row[3]),
+        }
+        for row in rows
+    ]
 
-        return render_template(
-    "dashboard.html",
-    passwords=passwords,
-    security_score=security_score
-)
+    security_score, _, _, _, _, _ = calculate_security_score(session["user_id"])
+
+    return render_template(
+        "dashboard.html",
+        passwords=passwords,
+        security_score=security_score
+    )
 
 
 @app.route("/view-password/<int:id>")
@@ -234,15 +284,30 @@ def security_center():
         session["user_id"]
     )
 
+    # ── Age / expiry counts ──────────────────────────────────
+    conn = sqlite3.connect("database.db")
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT created_at FROM vault WHERE user_id = ?",
+        (session["user_id"],)
+    )
+    age_rows = cursor.fetchall()
+    conn.close()
+
+    stale    = sum(1 for r in age_rows if get_age_status(r[0])["status"] == "warn")
+    overdue  = sum(1 for r in age_rows if get_age_status(r[0])["status"] == "critical")
+
     return render_template(
-    "security_center.html",
-    total=total,
-    weak=weak,
-    medium=medium,
-    strong=strong,
-    reused_passwords=reused_passwords,
-    security_score=security_score
-)
+        "security_center.html",
+        total=total,
+        weak=weak,
+        medium=medium,
+        strong=strong,
+        reused_passwords=reused_passwords,
+        security_score=security_score,
+        stale=stale,
+        overdue=overdue,
+    )
 
 
 @app.route("/delete-password/<int:id>")
@@ -286,6 +351,7 @@ def edit_password(id):
         )
         conn.commit()
         conn.close()
+        flash("✅ Password updated successfully!", "success")
         return redirect("/dashboard")
 
     cursor.execute(
@@ -320,6 +386,21 @@ def add_password():
         )
         conn.commit()
         conn.close()
+
+        # ── HIBP breach check ───────────────────────────────
+        breach_count = check_pwned(site_password)
+
+        if breach_count == -1:
+            flash("✅ Password added — breach check unavailable (HIBP API unreachable).", "success")
+        elif breach_count == 0:
+            flash("✅ Password added — no known breaches found! 🛡️", "success")
+        else:
+            flash(
+                f"✅ Password saved, but ⚠️ WARNING: this password appeared in "
+                f"{breach_count:,} known data breaches. Consider using a stronger password!",
+                "warning"
+            )
+
         return redirect("/dashboard")
 
     return render_template("add_password.html")

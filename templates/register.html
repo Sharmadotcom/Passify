@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 
 <head>
@@ -124,6 +124,29 @@
 
 </div>
 
+    {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+    <div class="flash-container">
+        {% for category, message in messages %}
+        <div class="flash {{ category }}" role="alert">
+            {{ message }}
+            <button class="flash-dismiss" onclick="this.parentElement.style.animation='flashOut .3s forwards';setTimeout(()=>this.parentElement.remove(),300);">&times;</button>
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+    {% endwith %}
+    <script>
+    document.addEventListener("DOMContentLoaded",()=>{
+        document.querySelectorAll(".flash").forEach(el=>{
+            setTimeout(()=>{
+                el.style.animation="flashOut .3s forwards";
+                setTimeout(()=>el.remove(),300);
+            },4000);
+        });
+    });
+    </script>
 </body>
 
 </html>
+

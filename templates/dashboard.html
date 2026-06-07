@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 
 <head>
@@ -205,18 +205,20 @@
     <div class="password-header">
 
         <div class="site-icon">
-            {{ item[1][0]|upper }}
+            {{ item.website[0]|upper }}
         </div>
 
         <div class="password-details">
 
-            <h3>
-                {{ item[1] }}
-            </h3>
+            <h3>{{ item.website }}</h3>
 
-            <p>
-                {{ item[2] }}
-            </p>
+            <p>{{ item.username }}</p>
+
+            <span class="age-badge age-{{ item.age.status }}">
+                {{ item.age.label }}
+                {% if item.age.status == "warn" %} &mdash; ⚠️ Update soon{% endif %}
+                {% if item.age.status == "critical" %} &mdash; 🔴 Overdue{% endif %}
+            </span>
 
         </div>
 
@@ -224,17 +226,11 @@
 
     <div class="actions">
 
-        <a href="/view-password/{{ item[0] }}">
-            View
-        </a>
+        <a href="/view-password/{{ item.id }}">View</a>
 
-        <a href="/edit-password/{{ item[0] }}">
-            Edit
-        </a>
+        <a href="/edit-password/{{ item.id }}">Edit</a>
 
-        <a href="/delete-password/{{ item[0] }}">
-            Delete
-        </a>
+        <a href="/delete-password/{{ item.id }}">Delete</a>
 
     </div>
 
@@ -276,7 +272,31 @@ window.onload = () => {
 
 </script>
 
+    {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+    <div class="flash-container">
+        {% for category, message in messages %}
+        <div class="flash {{ category }}" role="alert">
+            {{ message }}
+            <button class="flash-dismiss" onclick="this.parentElement.style.animation='flashOut .3s forwards';setTimeout(()=>this.parentElement.remove(),300);">&times;</button>
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+    {% endwith %}
+    <script>
+    document.addEventListener("DOMContentLoaded",()=>{
+        document.querySelectorAll(".flash").forEach(el=>{
+            setTimeout(()=>{
+                el.style.animation="flashOut .3s forwards";
+                setTimeout(()=>el.remove(),300);
+            },4000);
+        });
+    });
+    </script>
 </body>
 
 </html>
+
+
 

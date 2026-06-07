@@ -81,16 +81,20 @@ def calculate_security_score(user_id):
 
 @app.route("/", methods=["GET", "POST"])
 def login():
+
     if request.method == "POST":
+
         username = request.form["username"]
         password = request.form["password"]
 
         conn = sqlite3.connect("database.db")
         cursor = conn.cursor()
+
         cursor.execute(
             "SELECT * FROM users WHERE username = ?",
             (username,)
         )
+
         user = cursor.fetchone()
         conn.close()
 
@@ -101,35 +105,43 @@ def login():
 
         return "Invalid Username or Password"
 
-        return render_template("login.html")
-
-
+    # GET request
+    return render_template("login.html")
 @app.route("/register", methods=["GET", "POST"])
 def register():
+
     if request.method == "POST":
+
         username = request.form["username"]
         password = request.form["password"]
+
         password_hash = generate_password_hash(password)
 
         conn = sqlite3.connect("database.db")
         cursor = conn.cursor()
 
         try:
+
             cursor.execute(
-                "INSERT INTO users (username, password_hash) VALUES (?, ?)",
+                """
+                INSERT INTO users
+                (username, password_hash)
+                VALUES (?, ?)
+                """,
                 (username, password_hash)
             )
+
             conn.commit()
             conn.close()
-            return "User Registered Successfully"
+
+            return redirect("/")
 
         except sqlite3.IntegrityError:
+
             conn.close()
             return "User Already Exists"
 
-        return render_template("register.html")
-
-
+    return render_template("register.html")
 @app.route("/dashboard")
 def dashboard():
     if "user_id" not in session:

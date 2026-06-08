@@ -20,15 +20,16 @@ def init_db():
     """)
 
     cursor.execute("""
-    CREATE TABLE IF NOT EXISTS vault(
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        website TEXT NOT NULL,
-        site_username TEXT NOT NULL,
-        site_password TEXT NOT NULL,
-        user_id INTEGER NOT NULL,
-        created_at TEXT DEFAULT (datetime('now'))
-    )
-    """)
+CREATE TABLE IF NOT EXISTS vault(
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    website TEXT NOT NULL,
+    site_username TEXT NOT NULL,
+    site_password TEXT NOT NULL,
+    user_id INTEGER NOT NULL,
+    created_at TEXT DEFAULT (datetime('now')),
+    last_updated TEXT DEFAULT (datetime('now'))
+)
+""")
 
     # ── Migrations for databases created before these columns existed ──
     user_cols = [row[1] for row in cursor.execute("PRAGMA table_info(users)")]
@@ -54,6 +55,19 @@ def init_db():
         cursor.execute("ALTER TABLE vault ADD COLUMN created_at TEXT")
         cursor.execute(
             "UPDATE vault SET created_at = datetime('now') WHERE created_at IS NULL"
+        )
+
+    if "last_updated" not in vault_cols:
+        cursor.execute(
+            "ALTER TABLE vault ADD COLUMN last_updated TEXT"
+        )
+
+        cursor.execute(
+            """
+            UPDATE vault
+            SET last_updated = created_at
+            WHERE last_updated IS NULL
+            """
         )
 
     conn.commit()

@@ -592,13 +592,16 @@ def edit_password(id):
         website = request.form["website"]
         site_username = request.form["site_username"]
         site_password = request.form["site_password"]
+        last_updated = datetime.now().strftime("%Y-%m-%d")
         encrypted_password = encrypt_password(site_password)
 
         cursor.execute(
             """
             UPDATE vault
-            SET website = ?, site_username = ?, site_password = ?
-            WHERE id = ? AND user_id = ?
+            SET website = ?,
+    site_username = ?,
+    site_password = ?,
+    last_updated = ?
             """,
             (website, site_username, encrypted_password, id, session["user_id"])
         )
@@ -626,17 +629,31 @@ def add_password():
         website = request.form["website"]
         site_username = request.form["site_username"]
         site_password = request.form["site_password"]
+        last_updated = datetime.now().strftime("%Y-%m-%d")
         encrypted_password = encrypt_password(site_password)
 
         conn = sqlite3.connect("database.db")
         cursor = conn.cursor()
         cursor.execute(
-            """
-            INSERT INTO vault (website, site_username, site_password, user_id)
-            VALUES (?, ?, ?, ?)
-            """,
-            (website, site_username, encrypted_password, session["user_id"])
-        )
+    """
+    INSERT INTO vault
+    (
+        website,
+        site_username,
+        site_password,
+        user_id,
+        last_updated
+    )
+    VALUES (?, ?, ?, ?, ?)
+    """,
+    (
+        website,
+        site_username,
+        encrypted_password,
+        session["user_id"],
+        last_updated
+    )
+)
         conn.commit()
         conn.close()
 
@@ -697,8 +714,6 @@ def profile():
         password_count=total,
         security_score=security_score,
     )
-
-
 @app.route("/account-settings", methods=["GET", "POST"])
 def account_settings():
     if "user_id" not in session:
@@ -1056,4 +1071,4 @@ def import_vault():
     return redirect("/account-settings")
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run(debug=True)

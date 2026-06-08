@@ -33,7 +33,10 @@ from hibp import check_pwned
 
 init_db()
 app = Flask(__name__)
-app.secret_key = "super-secret-key"
+from dotenv import load_dotenv
+load_dotenv()
+
+app.secret_key = os.getenv("SECRET_KEY")
 import secrets
 
 def generate_backup_codes():

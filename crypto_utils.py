@@ -1,10 +1,9 @@
-from cryptography.fernet import Fernet
 import os
+from cryptography.fernet import Fernet
 
 def get_cipher():
-    with open("key.key", "rb") as f:
-        key = f.read()
-        return Fernet(key)
+    key = os.getenv("FERNET_KEY").encode()
+    return Fernet(key)
 
 def encrypt_password(password):
     return get_cipher().encrypt(password.encode()).decode()

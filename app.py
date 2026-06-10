@@ -759,10 +759,8 @@ def profile():
     joined_label = "Unknown"
     if user[2]:
         try:
-            from datetime import datetime
-            joined = datetime.fromisoformat(user[2])
-            joined_label = joined.strftime("%B %Y")
-        except ValueError:
+            joined_label = user[2].strftime("%B %Y")
+        except Exception:
             pass
 
     return render_template(

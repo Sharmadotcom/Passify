@@ -748,6 +748,7 @@ def profile():
         (session["user_id"],)
     )
     user = cursor.fetchone()
+    print("USER =", user)
     conn.close()
 
     password_count, _, _, _, _, _ = calculate_security_score(session["user_id"])

@@ -32,12 +32,80 @@ import urllib.parse
 from database import init_db
 from hibp import check_pwned
 
+# Import security modules
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
+from flask_limiter.errors import RateLimitExceeded
+from pydantic import ValidationError
+import nh3
+from schemas import (
+    UserRegisterSchema,
+    UserLoginSchema,
+    VaultItemSchema,
+    EmailUpdateSchema,
+    MasterPasswordSchema
+)
+
 init_db()
 app = Flask(__name__)
+
+# Load environment variables
 from dotenv import load_dotenv
 load_dotenv()
 
 app.secret_key = os.getenv("SECRET_KEY")
+
+# Session cookie security settings
+app.config["SESSION_COOKIE_HTTPONLY"] = True
+app.config["SESSION_COOKIE_SAMESITE"] = "Strict"
+app.config["SESSION_COOKIE_SECURE"] = os.getenv("SESSION_COOKIE_SECURE", "False").lower() in ("true", "1")
+
+# Maximum file upload limit (2MB) for vault import
+app.config["MAX_CONTENT_LENGTH"] = 2 * 1024 * 1024
+
+# Initialize rate limiter (60 requests per minute default)
+limiter = Limiter(
+    key_func=get_remote_address,
+    app=app,
+    default_limits=["60 per minute"],
+    storage_uri="memory://"
+)
+
+@app.errorhandler(RateLimitExceeded)
+def handle_rate_limit_exceeded(e):
+    if request.path.startswith("/api/"):
+        return {"error": "Too many requests. Please try again later."}, 429
+    flash("❌ Too many requests. Please try again later.", "error")
+    return redirect(request.referrer or "/")
+
+@app.errorhandler(400)
+def handle_bad_request(e):
+    return render_template("400.html"), 400
+
+@app.errorhandler(404)
+def handle_not_found_error(e):
+    return render_template("404.html"), 404
+
+@app.errorhandler(500)
+def handle_internal_server_error(e):
+    app.logger.error(f"Internal Server Error: {str(e)}")
+    return render_template("500.html"), 500
+
+@app.after_request
+def add_security_headers(response):
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline'; "
+        "style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data:; "
+        "frame-ancestors 'none';"
+    )
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers.pop("X-Powered-By", None)
+    return response
 import secrets
 
 def generate_backup_codes():
@@ -283,12 +351,27 @@ def get_recommendations(user_id: int) -> list:
 
 
 @app.route("/", methods=["GET", "POST"])
+@limiter.limit("5 per 15 minutes", methods=["POST"])
 def login():
+    if "user_id" in session:
+        return redirect("/dashboard")
 
     if request.method == "POST":
+        username_raw = request.form.get("username", "")
+        password_raw = request.form.get("password", "")
 
-        username = request.form["username"]
-        password = request.form["password"]
+        try:
+            # Enforce schema validation and input sanitization
+            data = UserLoginSchema(
+                username=nh3.clean(username_raw).strip(),
+                password=password_raw
+            )
+        except ValidationError as e:
+            flash(f"❌ {e.errors()[0]['msg']}", "error")
+            return redirect("/")
+
+        username = data.username
+        password = data.password
 
         conn = get_db()
         cursor = conn.cursor()
@@ -359,6 +442,7 @@ def close_db(error=None):
     if db is not None:
         db.close()
 @app.route("/login-2fa", methods=["GET", "POST"])
+@limiter.limit("5 per 15 minutes", methods=["POST"])
 def login_2fa():
     if "pre_2fa_user_id" not in session:
         return redirect("/")
@@ -388,20 +472,32 @@ def login_2fa():
 
     return render_template("login_2fa.html")
 @app.route("/register", methods=["GET", "POST"])
+@limiter.limit("5 per 15 minutes", methods=["POST"])
 def register():
+    if "user_id" in session:
+        return redirect("/dashboard")
 
     if request.method == "POST":
+        username_raw = request.form.get("username", "")
+        password_raw = request.form.get("password", "")
 
-        username = request.form["username"]
-        password = request.form["password"]
+        try:
+            data = UserRegisterSchema(
+                username=nh3.clean(username_raw).strip(),
+                password=password_raw
+            )
+        except ValidationError as e:
+            flash(f"❌ {e.errors()[0]['msg']}", "error")
+            return redirect("/register")
 
+        username = data.username
+        password = data.password
         password_hash = generate_password_hash(password)
 
         conn = get_db()
         cursor = conn.cursor()
 
         try:
-
             cursor.execute(
                 """
                 INSERT INTO users
@@ -417,7 +513,6 @@ def register():
             return redirect("/")
 
         except Exception:
-
             conn.close()
             flash("❌ That username is already taken. Please choose another.", "error")
             return redirect("/register")
@@ -439,7 +534,7 @@ def dashboard():
             """
             SELECT id, website, site_username, created_at, site_password
             FROM vault
-            WHERE user_id = %s AND website LIKE ?
+            WHERE user_id = %s AND website LIKE %s
             """,
             (session["user_id"], f"%{search}%")
         )
@@ -624,8 +719,8 @@ def bulk_delete():
     conn = get_db()
     cursor = conn.cursor()
     
-    # Securely delete multiple IDs
-    placeholders = ",".join(["?"] * len(password_ids))
+    # Securely delete multiple IDs using PostgreSQL placeholders
+    placeholders = ",".join(["%s"] * len(password_ids))
     params = password_ids + [session["user_id"]]
     cursor.execute(f"DELETE FROM vault WHERE id IN ({placeholders}) AND user_id = %s", params)
     
@@ -644,22 +739,47 @@ def edit_password(id):
     conn = get_db()
     cursor = conn.cursor()
 
+    # Enforce database ownership check
+    cursor.execute(
+        "SELECT website, site_username FROM vault WHERE id = %s AND user_id = %s",
+        (id, session["user_id"])
+    )
+    record = cursor.fetchone()
+    if not record:
+        conn.close()
+        flash("❌ Password not found or unauthorized.", "error")
+        return redirect("/dashboard")
+
     if request.method == "POST":
-        website = request.form["website"]
-        site_username = request.form["site_username"]
-        site_password = request.form["site_password"]
+        website_raw = request.form.get("website", "")
+        site_username_raw = request.form.get("site_username", "")
+        site_password_raw = request.form.get("site_password", "")
+
+        try:
+            data = VaultItemSchema(
+                website=nh3.clean(website_raw).strip(),
+                site_username=nh3.clean(site_username_raw).strip(),
+                site_password=site_password_raw
+            )
+        except ValidationError as e:
+            conn.close()
+            flash(f"❌ {e.errors()[0]['msg']}", "error")
+            return redirect(url_for("edit_password", id=id))
+
+        website = data.website
+        site_username = data.site_username
+        site_password = data.site_password
         last_updated = datetime.now().strftime("%Y-%m-%d")
         encrypted_password = encrypt_password(site_password)
 
         cursor.execute(
             """
             UPDATE vault
-SET website = %s,
-    site_username = %s,
-    site_password = %s,
-    last_updated = %s
-WHERE id = %s
-AND user_id = %s
+            SET website = %s,
+                site_username = %s,
+                site_password = %s,
+                last_updated = %s
+            WHERE id = %s AND user_id = %s
             """,
             (website, site_username, encrypted_password, id, session["user_id"])
         )
@@ -668,13 +788,7 @@ AND user_id = %s
         flash("✅ Password updated successfully!", "success")
         return redirect("/dashboard")
 
-    cursor.execute(
-        "SELECT website, site_username FROM vault WHERE id = %s AND user_id = %s",
-        (id, session["user_id"])
-    )
-    record = cursor.fetchone()
     conn.close()
-
     return render_template("edit_password.html", record=record)
 
 
@@ -684,34 +798,48 @@ def add_password():
         return redirect("/")
 
     if request.method == "POST":
-        website = request.form["website"]
-        site_username = request.form["site_username"]
-        site_password = request.form["site_password"]
+        website_raw = request.form.get("website", "")
+        site_username_raw = request.form.get("site_username", "")
+        site_password_raw = request.form.get("site_password", "")
+
+        try:
+            data = VaultItemSchema(
+                website=nh3.clean(website_raw).strip(),
+                site_username=nh3.clean(site_username_raw).strip(),
+                site_password=site_password_raw
+            )
+        except ValidationError as e:
+            flash(f"❌ {e.errors()[0]['msg']}", "error")
+            return redirect("/add-password")
+
+        website = data.website
+        site_username = data.site_username
+        site_password = data.site_password
         last_updated = datetime.now().strftime("%Y-%m-%d")
         encrypted_password = encrypt_password(site_password)
 
         conn = get_db()
         cursor = conn.cursor()
         cursor.execute(
-    """
-    INSERT INTO vault
-    (
-        website,
-        site_username,
-        site_password,
-        user_id,
-        last_updated
-    )
-    VALUES (%s, %s, %s, %s, %s)
-    """,
-    (
-        website,
-        site_username,
-        encrypted_password,
-        session["user_id"],
-        last_updated
-    )
-)
+            """
+            INSERT INTO vault
+            (
+                website,
+                site_username,
+                site_password,
+                user_id,
+                last_updated
+            )
+            VALUES (%s, %s, %s, %s, %s)
+            """,
+            (
+                website,
+                site_username,
+                encrypted_password,
+                session["user_id"],
+                last_updated
+            )
+        )
         conn.commit()
         conn.close()
 
@@ -780,7 +908,18 @@ def account_settings():
     cursor = conn.cursor()
 
     if request.method == "POST":
-        email = request.form.get("email", "").strip()
+        email_raw = request.form.get("email", "")
+
+        try:
+            data = EmailUpdateSchema(
+                email=nh3.clean(email_raw).strip()
+            )
+        except ValidationError as e:
+            conn.close()
+            flash(f"❌ {e.errors()[0]['msg']}", "error")
+            return redirect("/account-settings")
+
+        email = data.email
         cursor.execute(
             "UPDATE users SET email = %s WHERE id = %s",
             (email, session["user_id"])
@@ -1025,6 +1164,7 @@ def update_security_settings():
 
 
 @app.route("/setup-2fa", methods=["GET", "POST"])
+@limiter.limit("5 per 15 minutes", methods=["POST"])
 def setup_2fa():
 
     if "user_id" not in session:
@@ -1143,11 +1283,19 @@ def setup_2fa():
 
 
 @app.route("/api/unlock-password/<int:vault_id>", methods=["POST"])
+@limiter.limit("10 per minute")
 def unlock_password(vault_id):
     if "user_id" not in session:
         return "Unauthorized", 401
         
-    master_password = request.form.get("master_password", "")
+    master_password_raw = request.form.get("master_password", "")
+
+    try:
+        data = MasterPasswordSchema(master_password=master_password_raw)
+    except ValidationError as e:
+        return f"Invalid Input: {e.errors()[0]['msg']}", 400
+        
+    master_password = data.master_password
     
     conn = get_db()
     cursor = conn.cursor()
@@ -1170,13 +1318,26 @@ def unlock_password(vault_id):
 
 
 @app.route("/change-password", methods=["POST"])
+@limiter.limit("5 per 15 minutes", methods=["POST"])
 def change_password():
     if "user_id" not in session:
         return redirect("/")
 
-    current = request.form.get("current_password", "")
-    new_pw  = request.form.get("new_password", "")
-    confirm = request.form.get("confirm_password", "")
+    current_raw = request.form.get("current_password", "")
+    new_pw_raw  = request.form.get("new_password", "")
+    confirm_raw = request.form.get("confirm_password", "")
+
+    try:
+        current_data = MasterPasswordSchema(master_password=current_raw)
+        new_data = UserRegisterSchema(username="dummy", password=new_pw_raw)
+        confirm_data = MasterPasswordSchema(master_password=confirm_raw)
+    except ValidationError as e:
+        flash(f"❌ {e.errors()[0]['msg']}", "error")
+        return redirect("/account-settings")
+
+    current = current_data.master_password
+    new_pw = new_data.password
+    confirm = confirm_data.master_password
 
     # Fetch current hash
     conn = get_db()
@@ -1195,11 +1356,6 @@ def change_password():
     if new_pw != confirm:
         conn.close()
         flash("❌ New passwords do not match.", "error")
-        return redirect("/account-settings")
-
-    if len(new_pw) < 8:
-        conn.close()
-        flash("❌ New password must be at least 8 characters.", "error")
         return redirect("/account-settings")
 
     if check_password_hash(row[0], new_pw):
@@ -1285,6 +1441,7 @@ def export_vault():
         )
 
 @app.route("/import-vault", methods=["POST"])
+@limiter.limit("5 per minute", methods=["POST"])
 def import_vault():
     if "user_id" not in session:
         return redirect("/")
@@ -1298,7 +1455,22 @@ def import_vault():
         flash("❌ No file selected.", "error")
         return redirect("/account-settings")
         
-    content = file.read().decode("utf-8")
+    # Validate extension and content type (MIME) server-side
+    if not (file.filename.endswith(".json") or file.filename.endswith(".csv")):
+        flash("❌ Invalid file format. Only .json and .csv files are allowed.", "error")
+        return redirect("/account-settings")
+        
+    mime_type = file.mimetype
+    if mime_type not in ["application/json", "text/csv", "application/vnd.ms-excel", "text/plain"]:
+        flash("❌ Invalid file type. Only JSON and CSV files are allowed.", "error")
+        return redirect("/account-settings")
+
+    try:
+        content = file.read().decode("utf-8")
+    except Exception:
+        flash("❌ Failed to decode file. Make sure it is encoded in UTF-8.", "error")
+        return redirect("/account-settings")
+        
     records = []
     
     def clean_website(url_str):
@@ -1314,9 +1486,15 @@ def import_vault():
         if file.filename.endswith(".json"):
             data = json.loads(content)
             for item in data:
-                website = item.get("website") or item.get("url") or item.get("uri") or item.get("name") or ""
-                username = item.get("username") or item.get("login") or item.get("login_username") or ""
-                password = item.get("password") or item.get("login_password") or ""
+                website_raw = item.get("website") or item.get("url") or item.get("uri") or item.get("name") or ""
+                username_raw = item.get("username") or item.get("login") or item.get("login_username") or ""
+                password_raw = item.get("password") or item.get("login_password") or ""
+                
+                # Sanitize using nh3
+                website = nh3.clean(website_raw).strip()
+                username = nh3.clean(username_raw).strip()
+                password = password_raw
+                
                 records.append({
                     "website": clean_website(website),
                     "username": username,
@@ -1328,9 +1506,14 @@ def import_vault():
             for row in reader:
                 # Lowercase all keys for easier matching
                 row_lower = {k.lower().strip() if k else "": v for k, v in row.items()}
-                website = row_lower.get("website") or row_lower.get("url") or row_lower.get("uri") or row_lower.get("name") or ""
-                username = row_lower.get("username") or row_lower.get("login") or row_lower.get("login_username") or ""
-                password = row_lower.get("password") or row_lower.get("login_password") or ""
+                website_raw = row_lower.get("website") or row_lower.get("url") or row_lower.get("uri") or row_lower.get("name") or ""
+                username_raw = row_lower.get("username") or row_lower.get("login") or row_lower.get("login_username") or ""
+                password_raw = row_lower.get("password") or row_lower.get("login_password") or ""
+                
+                # Sanitize using nh3
+                website = nh3.clean(website_raw).strip()
+                username = nh3.clean(username_raw).strip()
+                password = password_raw
                 
                 records.append({
                     "website": clean_website(website),
@@ -1344,10 +1527,20 @@ def import_vault():
         imported_count = 0
         for rec in records:
             if rec["website"] and rec["password"]:
-                encrypted = encrypt_password(rec["password"])
+                # Basic Pydantic schema validation check per record
+                try:
+                    data = VaultItemSchema(
+                        website=rec["website"],
+                        site_username=rec["username"],
+                        site_password=rec["password"]
+                    )
+                except ValidationError:
+                    continue
+                    
+                encrypted = encrypt_password(data.site_password)
                 cursor.execute(
                     "INSERT INTO vault (website, site_username, site_password, user_id) VALUES (%s, %s, %s, %s)",
-                    (rec["website"], rec["username"], encrypted, session["user_id"])
+                    (data.website, data.site_username, encrypted, session["user_id"])
                 )
                 imported_count += 1
                 
@@ -1362,4 +1555,4 @@ def import_vault():
     return redirect("/account-settings")
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run(debug=os.getenv("FLASK_DEBUG", "False").lower() in ("true", "1"))

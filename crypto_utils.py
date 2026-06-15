@@ -1,4 +1,5 @@
 import os
+# pyrefly: ignore [missing-import]
 from cryptography.fernet import Fernet
 
 def get_cipher():

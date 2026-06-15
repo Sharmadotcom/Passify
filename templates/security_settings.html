@@ -260,59 +260,38 @@
                 </div>
                 {% endif %}
 
-                <div style="display: flex; justify-content: space-between; align-items: center;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; padding-bottom: 20px; border-bottom: 1px solid rgba(255,255,255,.08);">
                     <div>
                         <h3 style="color:#f9fafb; font-size:1.05rem; margin:0 0 4px;">Login Alerts</h3>
                         <p style="color:#9ca3af; font-size:.875rem; margin:0;">Get notified of logins from new devices.</p>
                     </div>
-                <div class="setting-item">
-    
-
-    <select id="autoLogout">
-        <option value="5" {% if auto_logout == 5 %}selected{% endif %}>
-    5 mins
-</option>
-
-<option value="15" {% if auto_logout == 15 %}selected{% endif %}>
-    15 mins
-</option>
-
-<option value="30" {% if auto_logout == 30 %}selected{% endif %}>
-    30 mins
-</option>
-
-<option value="0" {% if auto_logout == 0 %}selected{% endif %}>
-    Never
-</option>
-<option value="1" {% if auto_logout == 1 %}selected{% endif %}>
-    1 min
-</option>
-    </select>
-</div>
                     <label class="switch"><input type="checkbox" id="loginAlertsToggle" {% if login_alerts %}checked{% endif %} onchange="updateSetting('login_alerts', this.checked)"><span class="slider"></span></label>
                 </div>
-                <div class="setting-item">
-    <div>
-        <h3>Theme</h3>
-        <p>Choose your appearance mode.</p>
-    </div>
-<div>
-        <h3>Auto Logout</h3>
-        <p>Automatically log out after inactivity.</p>
-    </div>
-    <select id="themeSelect">
-        <option value="dark"
-            {% if theme == "dark" %}selected{% endif %}>
-            Dark Mode
-        </option>
 
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; padding-bottom: 20px; border-bottom: 1px solid rgba(255,255,255,.08);">
+                    <div>
+                        <h3 style="color:#f9fafb; font-size:1.05rem; margin:0 0 4px;">Auto Logout</h3>
+                        <p style="color:#9ca3af; font-size:.875rem; margin:0;">Automatically log out after inactivity.</p>
+                    </div>
+                    <select id="autoLogout" style="background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12); border-radius: 8px; padding: 8px 16px; color: #fff; font-size: 0.9rem; font-weight: 500; cursor: pointer; outline: none; transition: border-color 0.2s, background-color 0.2s;">
+                        <option value="1" {% if auto_logout == 1 %}selected{% endif %} style="background: #18181b; color: #fff;">1 min</option>
+                        <option value="5" {% if auto_logout == 5 %}selected{% endif %} style="background: #18181b; color: #fff;">5 mins</option>
+                        <option value="15" {% if auto_logout == 15 %}selected{% endif %} style="background: #18181b; color: #fff;">15 mins</option>
+                        <option value="30" {% if auto_logout == 30 %}selected{% endif %} style="background: #18181b; color: #fff;">30 mins</option>
+                        <option value="0" {% if auto_logout == 0 %}selected{% endif %} style="background: #18181b; color: #fff;">Never</option>
+                    </select>
+                </div>
 
-        <option value="system"
-            {% if theme == "system" %}selected{% endif %}>
-            System Mode
-        </option>
-    </select>
-</div>
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <div>
+                        <h3 style="color:#f9fafb; font-size:1.05rem; margin:0 0 4px;">Theme Mode</h3>
+                        <p style="color:#9ca3af; font-size:.875rem; margin:0;">Choose your preferred appearance mode.</p>
+                    </div>
+                    <select id="themeSelect" style="background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12); border-radius: 8px; padding: 8px 16px; color: #fff; font-size: 0.9rem; font-weight: 500; cursor: pointer; outline: none; transition: border-color 0.2s, background-color 0.2s;">
+                        <option value="dark" {% if theme == "dark" %}selected{% endif %} style="background: #18181b; color: #fff;">Dark Mode</option>
+                        <option value="system" {% if theme == "system" %}selected{% endif %} style="background: #18181b; color: #fff;">System Mode</option>
+                    </select>
+                </div>
             </div>
         </section>
         </div>

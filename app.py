@@ -74,6 +74,10 @@ load_dotenv()
 
 app.secret_key = os.getenv("SECRET_KEY")
 
+# For local development, allow insecure HTTP transport for OAuth
+if os.getenv("FLASK_DEBUG", "False").lower() in ("true", "1") or os.getenv("OAUTHLIB_INSECURE_TRANSPORT", "1") == "1":
+    os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'
+
 # Session cookie security settings
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Strict"
@@ -441,7 +445,8 @@ def auth_google_callback():
     try:
         token = google.authorize_access_token()
     except Exception as e:
-        flash("❌ Google authentication failed.", "error")
+        app.logger.error(f"Google OAuth callback error: {str(e)}")
+        flash(f"❌ Google authentication failed: {str(e)}", "error")
         return redirect("/")
 
     userinfo = token.get('userinfo')

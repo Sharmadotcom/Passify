@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>400 Bad Request | Passify</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body class="dark">
+<div class="auth-container">
+    <div class="auth-left">
+        <div class="auth-brand">
+            <div class="auth-logo">⚠️</div>
+            <h1>Passify</h1>
+        </div>
+        <span class="hero-tag">SECURITY GATE</span>
+        <h2>Invalid.<br>Request.<br>Blocked.</h2>
+        <p>The server rejected your request due to invalid formatting, size constraints, or failed schema validation.</p>
+    </div>
+    <div class="auth-right">
+        <div class="auth-card" style="text-align: center;">
+            <h2 style="font-size: 2.5rem; margin-bottom: 8px; color: #f43f5e;">400</h2>
+            <h3>Bad Request</h3>
+            <p class="auth-subtitle" style="margin-bottom: 32px; color: #9ca3af;">We couldn't process the request because the inputs did not pass security validation checks.</p>
+            <a href="/" class="auth-btn" style="display: inline-block; text-decoration: none; padding: 14px 28px; border-radius: 12px; font-weight: bold; background: #6366f1; color: white; transition: background 0.2s;">Return Home</a>
+        </div>
+    </div>
+</div>
+</body>
+</html>

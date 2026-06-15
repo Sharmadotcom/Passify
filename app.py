@@ -1122,34 +1122,41 @@ def security_settings():
     cursor = conn.cursor()
 
     cursor.execute(
-    """
-    SELECT
-        two_factor_enabled,
-        strict_mode,
-        login_alerts,
-        theme,
-        auto_logout
-    FROM users
-    WHERE id = %s
-    """,
-    (session["user_id"],)
-)
+        """
+        SELECT
+            two_factor_enabled,
+            strict_mode,
+            login_alerts,
+            theme,
+            auto_logout,
+            password_hash
+        FROM users
+        WHERE id = %s
+        """,
+        (session["user_id"],)
+    )
 
     row = cursor.fetchone()
 
     two_factor_enabled = bool(row[0])
     strict_mode = bool(row[1])
     login_alerts = bool(row[2])
-    auto_logout = row[3]
     theme = row[3]
+    auto_logout = row[4]
+    password_hash = row[5] or ""
+    is_oauth_only = password_hash.startswith("google-oauth-only-user-")
+
+    conn.close()
 
     return render_template(
-    "security_settings.html",
-    two_factor_enabled=two_factor_enabled,
-    strict_mode=strict_mode,
-    login_alerts=login_alerts,
-    auto_logout=auto_logout
-)
+        "security_settings.html",
+        two_factor_enabled=two_factor_enabled,
+        strict_mode=strict_mode,
+        login_alerts=login_alerts,
+        auto_logout=auto_logout,
+        theme=theme,
+        is_oauth_only=is_oauth_only
+    )
 @app.route("/update-theme", methods=["POST"])
 def update_theme():
 
@@ -1488,7 +1495,7 @@ def change_password():
     except ValidationError as e:
         conn.close()
         flash(f"❌ {e.errors()[0]['msg']}", "error")
-        return redirect("/account-settings")
+        return redirect(request.referrer or "/account-settings")
 
     new_pw = new_data.password
     confirm = confirm_data.master_password
@@ -1497,28 +1504,38 @@ def change_password():
         if not check_password_hash(current_hash, current):
             conn.close()
             flash("❌ Current password is incorrect.", "error")
-            return redirect("/account-settings")
+            return redirect(request.referrer or "/account-settings")
 
     if new_pw != confirm:
         conn.close()
         flash("❌ New passwords do not match.", "error")
-        return redirect("/account-settings")
+        return redirect(request.referrer or "/account-settings")
 
     if not is_oauth_only and check_password_hash(current_hash, new_pw):
         conn.close()
         flash("❌ New password must differ from your current password.", "error")
-        return redirect("/account-settings")
+        return redirect(request.referrer or "/account-settings")
 
     new_hash = generate_password_hash(new_pw)
-    cursor.execute(
-        "UPDATE users SET password_hash = %s WHERE id = %s",
-        (new_hash, session["user_id"])
-    )
+    enable_strict = request.form.get("enable_strict_mode") == "1"
+    if enable_strict:
+        cursor.execute(
+            "UPDATE users SET password_hash = %s, strict_mode = 1 WHERE id = %s",
+            (new_hash, session["user_id"])
+        )
+    else:
+        cursor.execute(
+            "UPDATE users SET password_hash = %s WHERE id = %s",
+            (new_hash, session["user_id"])
+        )
     conn.commit()
     conn.close()
 
-    flash("✅ Password changed successfully!", "success")
-    return redirect("/account-settings")
+    if enable_strict:
+        flash("✅ Master password set and Strict Mode enabled successfully!", "success")
+    else:
+        flash("✅ Password changed successfully!", "success")
+    return redirect(request.referrer or "/account-settings")
 
 
 @app.route("/delete-account", methods=["POST"])

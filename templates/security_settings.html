@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 
 <head>
@@ -230,6 +230,35 @@
                     </div>
                     <label class="switch"><input type="checkbox" id="strictModeToggle" {% if strict_mode %}checked{% endif %} onchange="updateSetting('strict_mode', this.checked)"><span class="slider"></span></label>
                 </div>
+
+                {% if is_oauth_only %}
+                <div id="oauthPasswordSetupSection" style="margin-top: -10px; margin-bottom: 20px; padding: 20px; background: rgba(99, 102, 241, 0.08); border: 1px solid rgba(99, 102, 241, 0.2); border-radius: 16px; display: none;">
+                    <h4 style="color: #a5b4fc; margin: 0 0 8px 0; font-size: 1.05rem; font-weight: 600;">🔐 Set a Master Password First</h4>
+                    <p style="color: #9ca3af; font-size: 0.85rem; margin: 0 0 16px 0;">To enable Strict Mode, you must set a master password. This password will be required to view or copy passwords in your vault.</p>
+                    
+                    <form id="setMasterPasswordForm" method="POST" action="/change-password">
+                        <input type="hidden" name="enable_strict_mode" value="1">
+                        
+                        <div class="form-group" style="margin-bottom: 16px;">
+                            <label style="font-size: 0.85rem; color: #d1d5db; display: block; margin-bottom: 6px;">Master Password</label>
+                            <input type="password" id="newPwField" name="new_password" placeholder="Create a strong password (min 8 chars)" required style="width: 100%; box-sizing: border-box; background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; padding: 12px; color: white;">
+                            
+                            <div id="strength-container" style="height: 4px; background: rgba(255,255,255,0.05); border-radius: 2px; margin-top: 8px; overflow: hidden;">
+                                <div id="strength-bar" style="height: 100%; width: 0%; transition: width 0.3s, background-color 0.3s;"></div>
+                            </div>
+                            <p id="strength-text" style="font-size: 0.75rem; color: #9ca3af; margin: 6px 0 0 0;">Password Strength</p>
+                        </div>
+                        
+                        <div class="form-group" style="margin-bottom: 20px;">
+                            <label style="font-size: 0.85rem; color: #d1d5db; display: block; margin-bottom: 6px;">Confirm Master Password</label>
+                            <input type="password" id="confirmPwField" name="confirm_password" placeholder="Re-enter master password" required style="width: 100%; box-sizing: border-box; background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; padding: 12px; color: white;">
+                            <p id="match-text" style="margin: 6px 0 0 0; font-size: 0.75rem; color: #6b7280;"></p>
+                        </div>
+                        
+                        <button type="submit" class="auth-btn save-btn" style="padding: 12px 20px; font-size: 0.9rem; width: auto; background: #6366f1; border: none; border-radius: 8px; color: white; font-weight: 600; cursor: pointer;">Set Password & Enable Strict Mode</button>
+                    </form>
+                </div>
+                {% endif %}
 
                 <div style="display: flex; justify-content: space-between; align-items: center;">
                     <div>
@@ -481,6 +510,18 @@ document.addEventListener("DOMContentLoaded", () => {
 
 <script>
 function updateSetting(setting, value) {
+    if (setting === 'strict_mode' && value === true) {
+        {% if is_oauth_only %}
+        const setupSection = document.getElementById('oauthPasswordSetupSection');
+        if (setupSection) {
+            setupSection.style.display = 'block';
+            setupSection.scrollIntoView({ behavior: 'smooth' });
+            document.getElementById('strictModeToggle').checked = false;
+            return;
+        }
+        {% endif %}
+    }
+
     const formData = new FormData();
     formData.append('setting', setting);
     formData.append('value', value);
@@ -489,13 +530,25 @@ function updateSetting(setting, value) {
         method: 'POST',
         body: formData
     })
-    .then(response => {
+    .then(async response => {
         if (!response.ok) {
-            alert('Failed to update setting');
+            const errText = await response.text();
+            alert(errText || 'Failed to update setting');
+            if (setting === 'strict_mode') {
+                document.getElementById('strictModeToggle').checked = !value;
+            } else if (setting === 'login_alerts') {
+                document.getElementById('loginAlertsToggle').checked = !value;
+            }
         }
     })
     .catch(error => {
         console.error('Error:', error);
+        alert('An error occurred while updating the setting.');
+        if (setting === 'strict_mode') {
+            document.getElementById('strictModeToggle').checked = !value;
+        } else if (setting === 'login_alerts') {
+            document.getElementById('loginAlertsToggle').checked = !value;
+        }
     });
 }
 </script>

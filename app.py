@@ -80,7 +80,7 @@ if os.getenv("FLASK_DEBUG", "False").lower() in ("true", "1") or os.getenv("OAUT
 
 # Session cookie security settings
 app.config["SESSION_COOKIE_HTTPONLY"] = True
-app.config["SESSION_COOKIE_SAMESITE"] = "Strict"
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 app.config["SESSION_COOKIE_SECURE"] = os.getenv("SESSION_COOKIE_SECURE", "False").lower() in ("true", "1")
 
 # Maximum file upload limit (2MB) for vault import

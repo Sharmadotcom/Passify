@@ -177,22 +177,42 @@
 
         </section>
 
-                <!-- SEARCH & BULK ACTIONS -->
-        <div style="display: flex; gap: 16px; margin-bottom: 24px;">
-            <form method="GET" action="/dashboard" class="search-form" style="margin-bottom: 0; flex: 1;">
+        <!-- SEARCH & BULK ACTIONS -->
+        <div style="display: flex; align-items: center; gap: 16px; margin-bottom: 24px; flex-wrap: wrap;">
+            <form method="GET" action="/dashboard" class="search-form" style="margin-bottom: 0; flex: 1; min-width: 200px;">
                 <input type="text" name="search" placeholder="Search websites..." style="width: 100%;">
             </form>
-            <button type="button" id="bulkDeleteBtn" onclick="submitBulkDelete()" style="padding: 0 20px; border-radius: 12px; background: rgba(239,68,68,0.15); color: #fca5a5; border: 1px solid rgba(239,68,68,0.3); font-weight: 600; cursor: pointer; transition: all 0.2s; display: none;">
+            
+            <label style="display: flex; align-items: center; gap: 8px; color: #9ca3af; font-size: 0.9rem; cursor: pointer; user-select: none; padding: 10px 14px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; height: 44px; box-sizing: border-box; transition: background 0.2s;">
+                <input type="checkbox" id="selectAllCheckbox" onchange="toggleSelectAll(this.checked)" style="width: 16px; height: 16px; cursor: pointer; accent-color: #6366f1; margin: 0;">
+                <span style="font-weight: 600;">Select All</span>
+            </label>
+            
+            <button type="button" id="bulkDeleteBtn" onclick="submitBulkDelete()" style="padding: 0 20px; height: 44px; border-radius: 12px; background: rgba(239,68,68,0.15); color: #fca5a5; border: 1px solid rgba(239,68,68,0.3); font-weight: 600; cursor: pointer; transition: all 0.2s; display: none;">
                 Delete Selected
             </button>
         </div>
 
         <script>
+        function toggleSelectAll(checked) {
+            const checkboxes = document.querySelectorAll('.bulk-cb');
+            checkboxes.forEach(cb => {
+                cb.checked = checked;
+            });
+            updateBulkDeleteBtn();
+        }
         function updateBulkDeleteBtn() {
-            const checked = document.querySelectorAll('.bulk-cb:checked').length;
+            const checkboxes = document.querySelectorAll('.bulk-cb');
+            const checkedBoxes = document.querySelectorAll('.bulk-cb:checked');
+            const selectAllCb = document.getElementById('selectAllCheckbox');
+            
+            if (selectAllCb) {
+                selectAllCb.checked = checkboxes.length > 0 && checkboxes.length === checkedBoxes.length;
+            }
+            
             const btn = document.getElementById('bulkDeleteBtn');
-            btn.style.display = checked > 0 ? 'block' : 'none';
-            btn.textContent = "Delete Selected (" + checked + ")";
+            btn.style.display = checkedBoxes.length > 0 ? 'block' : 'none';
+            btn.textContent = "Delete Selected (" + checkedBoxes.length + ")";
         }
         function submitBulkDelete() {
             if(confirm('⚠️ Are you sure you want to delete these passwords? This cannot be undone.')) {

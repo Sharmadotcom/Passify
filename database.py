@@ -39,4 +39,13 @@ def init_db():
     """)
 
     conn.commit()
+
+    # Database migration: add google_id column to users table if it does not exist
+    try:
+        cursor.execute("ALTER TABLE users ADD COLUMN google_id TEXT DEFAULT '';")
+        conn.commit()
+    except Exception:
+        # If the column already exists, rollback the transaction and ignore
+        conn.rollback()
+
     conn.close()

@@ -230,10 +230,11 @@
             <!-- ── Section 2: Change Password ─────── -->
             <div class="profile-card">
 
-                <p class="section-title">🔑 Change Password</p>
+                <p class="section-title">🔑 {% if is_oauth_only %}Set Master Password{% else %}Change Password{% endif %}</p>
 
                 <form method="POST" action="/change-password">
 
+                    {% if not is_oauth_only %}
                     <div class="form-group">
                         <label>Current Password</label>
                         <input
@@ -242,6 +243,7 @@
                             placeholder="Enter current password"
                             required>
                     </div>
+                    {% endif %}
 
                     <div class="form-group">
                         <label>New Password</label>
@@ -271,7 +273,7 @@
                     </div>
 
                     <button type="submit" class="auth-btn save-btn">
-                        Update Password
+                        {% if is_oauth_only %}Set Master Password{% else %}Update Password{% endif %}
                     </button>
 
                 </form>

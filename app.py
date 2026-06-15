@@ -1,11 +1,17 @@
 import os
 import secrets
+# pyrefly: ignore [missing-import]
 from flask import g
 from datetime import datetime, timezone
+# pyrefly: ignore [missing-import]
 from password_generator import generate_password
+# pyrefly: ignore [missing-import]
 from db import get_db
+# pyrefly: ignore [missing-import]
 from crypto_utils import encrypt_password
+# pyrefly: ignore [missing-import]
 from crypto_utils import decrypt_password
+# pyrefly: ignore [missing-import]
 from flask import (
     Flask,
     render_template,
@@ -16,10 +22,12 @@ from flask import (
     flash,
     Response
 )
+# pyrefly: ignore [missing-import]
 from werkzeug.security import (
     generate_password_hash,
     check_password_hash
 )
+# pyrefly: ignore [missing-import]
 import pyotp
 import qrcode
 import qrcode.image.svg
@@ -33,10 +41,16 @@ from database import init_db
 from hibp import check_pwned
 
 # Import security modules
+# pyrefly: ignore [missing-import]
+# pyrefly: ignore [missing-import]
 from flask_limiter import Limiter
+# pyrefly: ignore [missing-import]
 from flask_limiter.util import get_remote_address
+# pyrefly: ignore [missing-import]
 from flask_limiter.errors import RateLimitExceeded
+# pyrefly: ignore [missing-import]
 from pydantic import ValidationError
+# pyrefly: ignore [missing-import]
 import nh3
 from schemas import (
     UserRegisterSchema,
@@ -46,10 +60,15 @@ from schemas import (
     MasterPasswordSchema
 )
 
+# Import Authlib for Google Authentication
+# pyrefly: ignore [missing-import]
+from authlib.integrations.flask_client import OAuth
+
 init_db()
 app = Flask(__name__)
 
 # Load environment variables
+# pyrefly: ignore [missing-import]
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -69,6 +88,18 @@ limiter = Limiter(
     app=app,
     default_limits=["60 per minute"],
     storage_uri="memory://"
+)
+
+# Initialize OAuth registry
+oauth = OAuth(app)
+google = oauth.register(
+    name='google',
+    client_id=os.getenv('GOOGLE_CLIENT_ID'),
+    client_secret=os.getenv('GOOGLE_CLIENT_SECRET'),
+    server_metadata_url=os.getenv('GOOGLE_DISCOVERY_URL', 'https://accounts.google.com/.well-known/openid-configuration'),
+    client_kwargs={
+        'scope': 'openid email profile'
+    }
 )
 
 @app.errorhandler(RateLimitExceeded)
@@ -399,6 +430,99 @@ def login():
 
     # GET request
     return render_template("login.html")
+
+@app.route('/auth/login/google')
+def login_google():
+    redirect_uri = url_for('auth_google_callback', _external=True)
+    return google.authorize_redirect(redirect_uri)
+
+@app.route('/auth/callback/google')
+def auth_google_callback():
+    try:
+        token = google.authorize_access_token()
+    except Exception as e:
+        flash("❌ Google authentication failed.", "error")
+        return redirect("/")
+
+    userinfo = token.get('userinfo')
+    if not userinfo:
+        flash("❌ Failed to retrieve user information from Google.", "error")
+        return redirect("/")
+
+    google_id = userinfo.get('sub')
+    email = userinfo.get('email')
+    name = userinfo.get('name') or userinfo.get('given_name') or "Google User"
+
+    if not google_id or not email:
+        flash("❌ Google did not provide necessary user identifiers.", "error")
+        return redirect("/")
+
+    # Look up user in DB
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, username, two_factor_enabled FROM users WHERE google_id = %s", (google_id,))
+    user = cursor.fetchone()
+
+    if user:
+        # User exists, log them in
+        if user[2] == 1:
+            session["pre_2fa_user_id"] = user[0]
+            session["pre_2fa_username"] = user[1]
+            conn.close()
+            return redirect("/login-2fa")
+        else:
+            session["user_id"] = user[0]
+            session["username"] = user[1]
+            conn.close()
+            return redirect("/dashboard")
+    else:
+        # Check if email already exists
+        cursor.execute("SELECT id, username, google_id FROM users WHERE email = %s", (email,))
+        existing_email_user = cursor.fetchone()
+        if existing_email_user:
+            # Link google account to existing user
+            cursor.execute("UPDATE users SET google_id = %s WHERE id = %s", (google_id, existing_email_user[0]))
+            conn.commit()
+            session["user_id"] = existing_email_user[0]
+            session["username"] = existing_email_user[1]
+            conn.close()
+            flash("✅ Linked your Google account to your existing profile.", "success")
+            return redirect("/dashboard")
+        else:
+            # Register a new user
+            base_username = nh3.clean(name).strip().replace(" ", "_").lower()
+            if not base_username:
+                base_username = "google_user"
+            
+            # Check if username is taken
+            cursor.execute("SELECT id FROM users WHERE username = %s", (base_username,))
+            if cursor.fetchone():
+                import random
+                base_username = f"{base_username}_{random.randint(1000, 9999)}"
+
+            placeholder_hash = "google-oauth-only-user-" + secrets.token_hex(16)
+            
+            try:
+                cursor.execute(
+                    """
+                    INSERT INTO users (username, password_hash, email, google_id)
+                    VALUES (%s, %s, %s, %s)
+                    RETURNING id, username
+                    """,
+                    (base_username, placeholder_hash, email, google_id)
+                )
+                new_user = cursor.fetchone()
+                conn.commit()
+                
+                session["user_id"] = new_user[0]
+                session["username"] = new_user[1]
+                conn.close()
+                flash("✅ Welcome! Registered successfully with Google.", "success")
+                return redirect("/dashboard")
+            except Exception as e:
+                conn.close()
+                flash("❌ Registration failed during account creation.", "error")
+                return redirect("/")
 @app.route("/backup-codes")
 def backup_codes():
 
@@ -930,17 +1054,19 @@ def account_settings():
         return redirect("/account-settings")
 
     cursor.execute(
-        "SELECT email FROM users WHERE id = %s",
+        "SELECT email, password_hash FROM users WHERE id = %s",
         (session["user_id"],)
     )
     row = cursor.fetchone()
     email = row[0] if row and row[0] else ""
+    password_hash = row[1] if row and row[1] else ""
+    is_oauth_only = password_hash.startswith("google-oauth-only-user-")
     
     # We still need the password count for the Danger Zone message
     _, total, _, _, _, _ = calculate_security_score(session["user_id"])
     conn.close()
 
-    return render_template("account_settings.html", email=email, password_count=total)
+    return render_template("account_settings.html", email=email, password_count=total, is_oauth_only=is_oauth_only)
 
 @app.before_request
 def check_auto_logout():
@@ -1150,6 +1276,13 @@ def update_security_settings():
     cursor = conn.cursor()
     
     if setting == "strict_mode":
+        if value == "true":
+            # Enforce that OAuth-only users must set a master password before enabling strict mode
+            cursor.execute("SELECT password_hash FROM users WHERE id = %s", (session["user_id"],))
+            row = cursor.fetchone()
+            if row and row[0].startswith("google-oauth-only-user-"):
+                conn.close()
+                return "Cannot enable Strict Mode without setting a Master Password first. Please configure one in Account Settings.", 400
         cursor.execute("UPDATE users SET strict_mode = %s WHERE id = %s", (1 if value == "true" else 0, session["user_id"]))
     elif setting == "login_alerts":
         cursor.execute("UPDATE users SET login_alerts = %s WHERE id = %s", (1 if value == "true" else 0, session["user_id"]))
@@ -1323,22 +1456,6 @@ def change_password():
     if "user_id" not in session:
         return redirect("/")
 
-    current_raw = request.form.get("current_password", "")
-    new_pw_raw  = request.form.get("new_password", "")
-    confirm_raw = request.form.get("confirm_password", "")
-
-    try:
-        current_data = MasterPasswordSchema(master_password=current_raw)
-        new_data = UserRegisterSchema(username="dummy", password=new_pw_raw)
-        confirm_data = MasterPasswordSchema(master_password=confirm_raw)
-    except ValidationError as e:
-        flash(f"❌ {e.errors()[0]['msg']}", "error")
-        return redirect("/account-settings")
-
-    current = current_data.master_password
-    new_pw = new_data.password
-    confirm = confirm_data.master_password
-
     # Fetch current hash
     conn = get_db()
     cursor = conn.cursor()
@@ -1347,18 +1464,42 @@ def change_password():
         (session["user_id"],)
     )
     row = cursor.fetchone()
+    current_hash = row[0] if row else ""
+    is_oauth_only = current_hash.startswith("google-oauth-only-user-")
 
-    if not row or not check_password_hash(row[0], current):
+    current_raw = request.form.get("current_password", "")
+    new_pw_raw  = request.form.get("new_password", "")
+    confirm_raw = request.form.get("confirm_password", "")
+
+    try:
+        if not is_oauth_only:
+            current_data = MasterPasswordSchema(master_password=current_raw)
+            current = current_data.master_password
+        else:
+            current = ""
+            
+        new_data = UserRegisterSchema(username="dummy", password=new_pw_raw)
+        confirm_data = MasterPasswordSchema(master_password=confirm_raw)
+    except ValidationError as e:
         conn.close()
-        flash("❌ Current password is incorrect.", "error")
+        flash(f"❌ {e.errors()[0]['msg']}", "error")
         return redirect("/account-settings")
+
+    new_pw = new_data.password
+    confirm = confirm_data.master_password
+
+    if not is_oauth_only:
+        if not check_password_hash(current_hash, current):
+            conn.close()
+            flash("❌ Current password is incorrect.", "error")
+            return redirect("/account-settings")
 
     if new_pw != confirm:
         conn.close()
         flash("❌ New passwords do not match.", "error")
         return redirect("/account-settings")
 
-    if check_password_hash(row[0], new_pw):
+    if not is_oauth_only and check_password_hash(current_hash, new_pw):
         conn.close()
         flash("❌ New password must differ from your current password.", "error")
         return redirect("/account-settings")
